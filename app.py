@@ -83,107 +83,54 @@ def calculate_position(line1, line2):
     }
 
 
-# Get satellite data
-try:
-    satellites = get_satellites()
-except Exception as e:
-    st.error(f"Could not load satellite data: {e}")
-    st.stop()
+@st.cache_data(ttl=3600)
+def get_satellites():
 
+    sources = [
+        "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle",
+        "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle",
+    ]
 
-# Satellite selector
-names = [sat["name"] for sat in satellites]
+    last_error = None
 
-selected_name = st.selectbox(
-    "🔎 Select Satellite",
-    names
-)
+    for url in sources:
+        try:
+            response = requests.get(
+                url,
+                timeout=60,
+                headers={
+                    "User-Agent": "ADYRA-OrbitGuard/1.0"
+                }
+            )
 
-selected_satellite = next(
-    sat for sat in satellites
-    if sat["name"] == selected_name
-)
+            response.raise_for_status()
 
+            lines = [
+                line.strip()
+                for line in response.text.splitlines()
+                if line.strip()
+            ]
 
-# Calculate position
-data = calculate_position(
-    selected_satellite["line1"],
-    selected_satellite["line2"]
-)
+            satellites = []
 
+            for i in range(0, len(lines) - 2, 3):
 
-if data:
+                if (
+                    lines[i + 1].startswith("1 ")
+                    and lines[i + 2].startswith("2 ")
+                ):
+                    satellites.append({
+                        "name": lines[i],
+                        "line1": lines[i + 1],
+                        "line2": lines[i + 2]
+                    })
 
-    st.markdown("### 📍 Current Estimated Position")
+            if satellites:
+                return satellites
 
-    col1, col2, col3, col4 = st.columns(4)
+        except Exception as e:
+            last_error = e
 
-    col1.metric(
-        "Latitude",
-        f"{data['latitude']:.4f}°"
-    )
-
-    col2.metric(
-        "Longitude",
-        f"{data['longitude']:.4f}°"
-    )
-
-    col3.metric(
-        "Altitude",
-        f"{data['altitude']:.2f} km"
-    )
-
-    col4.metric(
-        "Velocity",
-        f"{data['velocity']:.2f} km/s"
-    )
-
-    st.caption(
-        "Position calculated using the satellite's current TLE "
-        f"at {data['time'].strftime('%Y-%m-%d %H:%M:%S UTC')}"
-    )
-
-
-    # Map
-    st.markdown("### 🌍 Satellite Location")
-
-    fig = go.Figure()
-
-    fig.add_trace(
-        go.Scattergeo(
-            lon=[data["longitude"]],
-            lat=[data["latitude"]],
-            mode="markers",
-            marker=dict(
-                size=15,
-                color="cyan"
-            ),
-            text=[
-                f"{selected_name}<br>"
-                f"Altitude: {data['altitude']:.2f} km"
-            ],
-            hoverinfo="text"
-        )
-    )
-
-    fig.update_geos(
-        projection_type="orthographic",
-        showland=True,
-        showcountries=True,
-        showocean=True
-    )
-
-    fig.update_layout(
-        height=650,
-        margin=dict(
-            l=0,
-            r=0,
-            t=0,
-            b=0
-        )
-    )
-
-    st.plotly_chart(
-        fig,
-        use_container_width=True
+    raise Exception(
+        f"All satellite data sources failed. Last error: {last_error}"
     )
