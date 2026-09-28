@@ -1,23 +1,18 @@
 import streamlit as st
 import requests
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
 from sgp4.api import Satrec
 from datetime import datetime, timezone
 
 st.set_page_config(
-    page_title="ADYRA Space",
+    page_title="ADYRA OrbitGuard",
     page_icon="🛰️",
     layout="wide"
 )
 
-st.title("🛰️ ADYRA SPACE")
-st.subheader("Real-Time Satellite Position & Conjunction Analysis")
-
-# --------------------------------------------------
-# GET REAL TLE DATA FROM CELESTRAK
-# --------------------------------------------------
+st.title("🛰️ ADYRA OrbitGuard")
+st.caption("Real-time satellite tracking & conjunction screening")
 
 @st.cache_data(ttl=3600)
 def get_satellites():
@@ -26,29 +21,25 @@ def get_satellites():
     response = requests.get(url, timeout=20)
     response.raise_for_status()
 
-    lines = [x.strip() for x in response.text.splitlines() if x.strip()]
+    lines = [
+        line.strip()
+        for line in response.text.splitlines()
+        if line.strip()
+    ]
 
     satellites = []
 
     for i in range(0, len(lines) - 2, 3):
-        name = lines[i]
-        line1 = lines[i + 1]
-        line2 = lines[i + 2]
-
         satellites.append({
-            "name": name,
-            "line1": line1,
-            "line2": line2
+            "name": lines[i],
+            "line1": lines[i + 1],
+            "line2": lines[i + 2]
         })
 
     return satellites
 
 
-# --------------------------------------------------
-# SATELLITE POSITION
-# --------------------------------------------------
-
-def satellite_position(line1, line2):
+def calculate_position(line1, line2):
 
     satellite = Satrec.twoline2rv(line1, line2)
 
@@ -69,12 +60,9 @@ def satellite_position(line1, line2):
     position = np.array(position)
     velocity = np.array(velocity)
 
-    # Position returned by SGP4 is km
     altitude = np.linalg.norm(position) - 6378.137
-
     speed = np.linalg.norm(velocity)
 
-    # Approximate geocentric latitude / longitude
     longitude = np.degrees(
         np.arctan2(position[1], position[0])
     )
@@ -91,112 +79,111 @@ def satellite_position(line1, line2):
         "longitude": longitude,
         "altitude": altitude,
         "velocity": speed,
-        "timestamp": now
+        "time": now
     }
 
 
-# --------------------------------------------------
-# LOAD SATELLITES
-# --------------------------------------------------
-
+# Get satellite data
 try:
     satellites = get_satellites()
-
 except Exception as e:
-    st.error(f"Unable to retrieve satellite data: {e}")
+    st.error(f"Could not load satellite data: {e}")
     st.stop()
 
 
-names = [s["name"] for s in satellites]
+# Satellite selector
+names = [sat["name"] for sat in satellites]
 
-selected = st.selectbox(
-    "🔎 Select a satellite",
+selected_name = st.selectbox(
+    "🔎 Select Satellite",
     names
 )
 
-sat = next(
-    s for s in satellites
-    if s["name"] == selected
-)
-
-data = satellite_position(
-    sat["line1"],
-    sat["line2"]
+selected_satellite = next(
+    sat for sat in satellites
+    if sat["name"] == selected_name
 )
 
 
-# --------------------------------------------------
-# DISPLAY POSITION
-# --------------------------------------------------
+# Calculate position
+data = calculate_position(
+    selected_satellite["line1"],
+    selected_satellite["line2"]
+)
+
 
 if data:
 
-    c1, c2, c3, c4 = st.columns(4)
+    st.markdown("### 📍 Current Estimated Position")
 
-    c1.metric(
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric(
         "Latitude",
         f"{data['latitude']:.4f}°"
     )
 
-    c2.metric(
+    col2.metric(
         "Longitude",
         f"{data['longitude']:.4f}°"
     )
 
-    c3.metric(
+    col3.metric(
         "Altitude",
         f"{data['altitude']:.2f} km"
     )
 
-    c4.metric(
+    col4.metric(
         "Velocity",
         f"{data['velocity']:.2f} km/s"
     )
 
     st.caption(
-        f"Estimated position calculated from current TLE • "
-        f"{data['timestamp'].strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        "Position calculated using the satellite's current TLE "
+        f"at {data['time'].strftime('%Y-%m-%d %H:%M:%S UTC')}"
     )
 
 
-# --------------------------------------------------
-# EARTH MAP
-# --------------------------------------------------
+    # Map
+    st.markdown("### 🌍 Satellite Location")
 
-st.markdown("### 🌍 Current Satellite Position")
+    fig = go.Figure()
 
-fig = go.Figure()
-
-fig.add_trace(
-    go.Scattergeo(
-        lon=[data["longitude"]],
-        lat=[data["latitude"]],
-        mode="markers",
-        marker=dict(
-            size=14,
-            color="cyan"
-        ),
-        text=[
-            f"{selected}<br>"
-            f"Altitude: {data['altitude']:.2f} km"
-        ],
-        hoverinfo="text"
+    fig.add_trace(
+        go.Scattergeo(
+            lon=[data["longitude"]],
+            lat=[data["latitude"]],
+            mode="markers",
+            marker=dict(
+                size=15,
+                color="cyan"
+            ),
+            text=[
+                f"{selected_name}<br>"
+                f"Altitude: {data['altitude']:.2f} km"
+            ],
+            hoverinfo="text"
+        )
     )
-)
 
-fig.update_geos(
-    projection_type="orthographic",
-    showland=True,
-    showcountries=True,
-    showocean=True
-)
+    fig.update_geos(
+        projection_type="orthographic",
+        showland=True,
+        showcountries=True,
+        showocean=True
+    )
 
-fig.update_layout(
-    height=650,
-    margin=dict(l=0, r=0, t=0, b=0)
-)
+    fig.update_layout(
+        height=650,
+        margin=dict(
+            l=0,
+            r=0,
+            t=0,
+            b=0
+        )
+    )
 
-st.plotly_chart(
-    fig,
-    use_container_width=True
-)
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
