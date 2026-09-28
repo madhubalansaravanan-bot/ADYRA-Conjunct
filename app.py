@@ -23,12 +23,18 @@ st.caption("Real-Time Satellite Tracking & Orbital Visualization")
 # CONSTANTS
 # =========================================================
 
-EARTH_RADIUS = 6378.137  # km
+EARTH_RADIUS = 6378.137
 
+# Real TLE data mirror
 TLE_URL = (
     "https://raw.githubusercontent.com/"
     "caelo-works/tle-mirror/main/tle/stations.tle"
 )
+
+# Visual exaggeration only.
+# The actual satellite calculations are NOT changed.
+VISUAL_ALTITUDE_SCALE = 3.0
+
 
 # =========================================================
 # LOAD REAL SATELLITE DATA
@@ -82,23 +88,32 @@ def julian_date(dt):
 
 
 # =========================================================
-# GREENWICH SIDEREAL TIME
-# Converts ECI/TEME → Earth-fixed coordinates
+# GMST
 # =========================================================
 
 def gmst_angle(jd):
 
-    T = (jd - 2451545.0) / 36525.0
+    T = (
+        jd - 2451545.0
+    ) / 36525.0
 
     gmst = (
         280.46061837
-        + 360.98564736629 * (jd - 2451545.0)
-        + 0.000387933 * T * T
+        + 360.98564736629
+        * (jd - 2451545.0)
+        + 0.000387933
+        * T * T
         - (T ** 3) / 38710000.0
     )
 
-    return math.radians(gmst % 360)
+    return math.radians(
+        gmst % 360
+    )
 
+
+# =========================================================
+# TEME / ECI → ECEF
+# =========================================================
 
 def eci_to_ecef(position, jd):
 
@@ -126,31 +141,37 @@ def eci_to_ecef(position, jd):
 
 
 # =========================================================
-# ECEF → LAT/LON/ALT
+# ECEF → LATITUDE / LONGITUDE / ALTITUDE
 # =========================================================
 
 def ecef_to_geodetic(position):
 
     x, y, z = position
 
-    longitude = math.atan2(y, x)
+    longitude = math.atan2(
+        y,
+        x
+    )
 
-    distance = math.sqrt(
-        x * x + y * y
+    horizontal_distance = math.sqrt(
+        x * x +
+        y * y
     )
 
     latitude = math.atan2(
         z,
-        distance
+        horizontal_distance
+    )
+
+    radius = math.sqrt(
+        x * x +
+        y * y +
+        z * z
     )
 
     altitude = (
-        math.sqrt(
-            x * x +
-            y * y +
-            z * z
-        )
-        - EARTH_RADIUS
+        radius -
+        EARTH_RADIUS
     )
 
     return (
@@ -164,9 +185,11 @@ def ecef_to_geodetic(position):
 # CURRENT SATELLITE POSITION
 # =========================================================
 
-def current_position(satellite):
+def get_current_position(satellite):
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(
+        timezone.utc
+    )
 
     jd = julian_date(now)
 
@@ -218,7 +241,9 @@ def calculate_orbit(
     step=2
 ):
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(
+        timezone.utc
+    )
 
     orbit_points = []
     ground_track = []
@@ -229,8 +254,11 @@ def calculate_orbit(
         step
     ):
 
-        dt = now + timedelta(
-            minutes=float(minute)
+        dt = (
+            now +
+            timedelta(
+                minutes=float(minute)
+            )
         )
 
         jd = julian_date(dt)
@@ -246,33 +274,38 @@ def calculate_orbit(
         if error != 0:
             continue
 
-        position = np.array(position)
+        position = np.array(
+            position
+        )
 
         ecef = eci_to_ecef(
             position,
             jd
         )
 
-        lat, lon, alt = ecef_to_geodetic(
-            ecef
+        latitude, longitude, altitude = (
+            ecef_to_geodetic(ecef)
         )
 
         orbit_points.append({
             "position": ecef,
-            "altitude": alt,
+            "altitude": altitude,
             "time": dt
         })
 
         ground_track.append({
-            "latitude": lat,
-            "longitude": lon
+            "latitude": latitude,
+            "longitude": longitude
         })
 
-    return orbit_points, ground_track
+    return (
+        orbit_points,
+        ground_track
+    )
 
 
 # =========================================================
-# EARTH SPHERE
+# EARTH
 # =========================================================
 
 def create_earth():
@@ -324,13 +357,15 @@ try:
 
     satellites = load_satellites()
 
-except Exception as e:
+except Exception as error:
 
     st.error(
         "Unable to load real satellite data."
     )
 
-    st.code(str(e))
+    st.code(
+        str(error)
+    )
 
     st.stop()
 
@@ -350,12 +385,12 @@ st.success(
 
 
 # =========================================================
-# SATELLITE SELECTOR
+# SELECT SATELLITE
 # =========================================================
 
 satellite_names = [
-    sat["name"]
-    for sat in satellites
+    satellite["name"]
+    for satellite in satellites
 ]
 
 selected_name = st.selectbox(
@@ -364,9 +399,9 @@ selected_name = st.selectbox(
 )
 
 selected = next(
-    sat
-    for sat in satellites
-    if sat["name"] == selected_name
+    satellite
+    for satellite in satellites
+    if satellite["name"] == selected_name
 )
 
 
@@ -384,7 +419,7 @@ satellite = Satrec.twoline2rv(
 # CURRENT POSITION
 # =========================================================
 
-data = current_position(
+data = get_current_position(
     satellite
 )
 
@@ -398,35 +433,37 @@ if data is None:
 
 
 # =========================================================
-# INFORMATION CARDS
+# POSITION INFORMATION
 # =========================================================
 
-st.markdown("## 📍 Current Satellite Position")
+st.markdown(
+    "## 📍 Current Estimated Position"
+)
 
-c1, c2, c3, c4 = st.columns(4)
+col1, col2, col3, col4 = st.columns(4)
 
-c1.metric(
+col1.metric(
     "Latitude",
     f"{data['latitude']:.4f}°"
 )
 
-c2.metric(
+col2.metric(
     "Longitude",
     f"{data['longitude']:.4f}°"
 )
 
-c3.metric(
+col3.metric(
     "Altitude",
     f"{data['altitude']:.2f} km"
 )
 
-c4.metric(
+col4.metric(
     "Velocity",
     f"{data['velocity']:.3f} km/s"
 )
 
 st.caption(
-    "Position propagated using SGP4 from the latest available TLE."
+    "Position calculated using SGP4 from the latest available TLE."
 )
 
 st.caption(
@@ -441,7 +478,7 @@ st.caption(
 # ORBIT CALCULATION
 # =========================================================
 
-orbit, ground = calculate_orbit(
+orbit, ground_track = calculate_orbit(
     satellite,
     minutes=100,
     step=2
@@ -457,57 +494,65 @@ if not orbit:
 
 
 # =========================================================
-# 3D VISUALIZATION
+# 3D EARTH
 # =========================================================
 
-st.markdown("## 🌍 3D Orbital Position")
+st.markdown(
+    "## 🌍 3D Satellite Tracking"
+)
 
-
-earth_x, earth_y, earth_z = create_earth()
+earth_x, earth_y, earth_z = (
+    create_earth()
+)
 
 fig = go.Figure()
 
 
-# ---------------------------------------------------------
-# EARTH
-# ---------------------------------------------------------
+# =========================================================
+# EARTH SURFACE
+# =========================================================
 
 fig.add_trace(
     go.Surface(
         x=earth_x,
         y=earth_y,
         z=earth_z,
+
         colorscale=[
-            [0.0, "#061329"],
-            [0.35, "#0A3154"],
-            [0.65, "#12618A"],
-            [1.0, "#1B8EB5"]
+            [0.0, "#020817"],
+            [0.25, "#06284A"],
+            [0.50, "#075985"],
+            [0.75, "#0891B2"],
+            [1.0, "#22D3EE"]
         ],
+
         showscale=False,
-        opacity=0.95,
+        opacity=0.92,
+
         hoverinfo="skip",
+
         name="Earth"
     )
 )
 
 
-# ---------------------------------------------------------
-# ORBIT PATH
-# ---------------------------------------------------------
+# =========================================================
+# ORBIT TRAJECTORY
+# =========================================================
 
 orbit_x = [
-    p["position"][0]
-    for p in orbit
+    point["position"][0]
+    for point in orbit
 ]
 
 orbit_y = [
-    p["position"][1]
-    for p in orbit
+    point["position"][1]
+    for point in orbit
 ]
 
 orbit_z = [
-    p["position"][2]
-    for p in orbit
+    point["position"][2]
+    for point in orbit
 ]
 
 fig.add_trace(
@@ -515,65 +560,82 @@ fig.add_trace(
         x=orbit_x,
         y=orbit_y,
         z=orbit_z,
+
         mode="lines",
+
         line=dict(
             color="#35D5F5",
-            width=5
+            width=6
         ),
+
         name="Predicted Orbit",
+
         hoverinfo="skip"
     )
 )
 
 
-# ---------------------------------------------------------
-# CURRENT SATELLITE
-# ---------------------------------------------------------
+# =========================================================
+# TRUE CURRENT POSITION
+# =========================================================
 
-sat_x = data["ecef"][0]
-sat_y = data["ecef"][1]
-sat_z = data["ecef"][2]
+true_x = data["ecef"][0]
+true_y = data["ecef"][1]
+true_z = data["ecef"][2]
 
-fig.add_trace(
-    go.Scatter3d(
-        x=[sat_x],
-        y=[sat_y],
-        z=[sat_z],
-        mode="markers+text",
-        marker=dict(
-            size=12,
-            color="#FFB454",
-            symbol="diamond"
-        ),
-        text=["🛰️ " + selected_name],
-        textposition="top center",
-        textfont=dict(
-            size=14,
-            color="white"
-        ),
-        name="Current Position",
-        hovertemplate=(
-            "<b>%{text}</b><br>"
-            f"Latitude: {data['latitude']:.4f}°<br>"
-            f"Longitude: {data['longitude']:.4f}°<br>"
-            f"Altitude: {data['altitude']:.2f} km"
-            "<extra></extra>"
-        )
+
+# =========================================================
+# EARTH SURFACE POINT
+# =========================================================
+
+surface_scale = (
+    EARTH_RADIUS /
+    (
+        EARTH_RADIUS +
+        data["altitude"]
     )
 )
 
+surface_x = true_x * surface_scale
+surface_y = true_y * surface_scale
+surface_z = true_z * surface_scale
 
-# ---------------------------------------------------------
-# ALTITUDE LINE
-# ---------------------------------------------------------
 
-surface_scale = EARTH_RADIUS / (
-    EARTH_RADIUS + data["altitude"]
+# =========================================================
+# VISUALLY EXAGGERATED SATELLITE POSITION
+# =========================================================
+
+direction = np.array([
+    true_x,
+    true_y,
+    true_z
+])
+
+direction = (
+    direction /
+    np.linalg.norm(direction)
 )
 
-surface_x = sat_x * surface_scale
-surface_y = sat_y * surface_scale
-surface_z = sat_z * surface_scale
+visual_radius = (
+    EARTH_RADIUS
+    +
+    data["altitude"]
+    * VISUAL_ALTITUDE_SCALE
+)
+
+visual_position = (
+    direction *
+    visual_radius
+)
+
+sat_x = visual_position[0]
+sat_y = visual_position[1]
+sat_z = visual_position[2]
+
+
+# =========================================================
+# ALTITUDE CONNECTOR
+# =========================================================
 
 fig.add_trace(
     go.Scatter3d(
@@ -581,43 +643,101 @@ fig.add_trace(
             surface_x,
             sat_x
         ],
+
         y=[
             surface_y,
             sat_y
         ],
+
         z=[
             surface_z,
             sat_z
         ],
+
         mode="lines",
+
         line=dict(
             color="#FFB454",
-            width=4,
+            width=5,
             dash="dash"
         ),
+
         name="Altitude"
     )
 )
 
 
-# ---------------------------------------------------------
-# GROUND POINT
-# ---------------------------------------------------------
+# =========================================================
+# SATELLITE GLOW
+# =========================================================
 
 fig.add_trace(
     go.Scatter3d(
-        x=[surface_x],
-        y=[surface_y],
-        z=[surface_z],
+        x=[sat_x],
+        y=[sat_y],
+        z=[sat_z],
+
         mode="markers",
+
         marker=dict(
-            size=7,
-            color="#FF5D73"
+            size=38,
+            color="#FFB454",
+            opacity=0.16
         ),
-        name="Ground Position",
+
+        hoverinfo="skip",
+
+        showlegend=False
+    )
+)
+
+
+# =========================================================
+# SATELLITE MARKER
+# =========================================================
+
+fig.add_trace(
+    go.Scatter3d(
+        x=[sat_x],
+        y=[sat_y],
+        z=[sat_z],
+
+        mode="markers+text",
+
+        marker=dict(
+            size=18,
+            color="#FFB454",
+            symbol="diamond",
+
+            line=dict(
+                color="white",
+                width=2
+            )
+        ),
+
+        text=[
+            "🛰️ " + selected_name
+        ],
+
+        textposition="top center",
+
+        textfont=dict(
+            size=16,
+            color="white"
+        ),
+
+        name="Satellite",
+
         hovertemplate=(
-            f"Latitude: {data['latitude']:.4f}°<br>"
-            f"Longitude: {data['longitude']:.4f}°"
+            "<b>%{text}</b><br>"
+            f"Latitude: "
+            f"{data['latitude']:.4f}°<br>"
+            f"Longitude: "
+            f"{data['longitude']:.4f}°<br>"
+            f"Altitude: "
+            f"{data['altitude']:.2f} km<br>"
+            f"Velocity: "
+            f"{data['velocity']:.3f} km/s"
             "<extra></extra>"
         )
     )
@@ -625,7 +745,37 @@ fig.add_trace(
 
 
 # =========================================================
-# CAMERA / LAYOUT
+# GROUND POSITION
+# =========================================================
+
+fig.add_trace(
+    go.Scatter3d(
+        x=[surface_x],
+        y=[surface_y],
+        z=[surface_z],
+
+        mode="markers",
+
+        marker=dict(
+            size=9,
+            color="#FF5D73"
+        ),
+
+        name="Ground Position",
+
+        hovertemplate=(
+            f"Latitude: "
+            f"{data['latitude']:.4f}°<br>"
+            f"Longitude: "
+            f"{data['longitude']:.4f}°"
+            "<extra></extra>"
+        )
+    )
+)
+
+
+# =========================================================
+# 3D CAMERA / STYLE
 # =========================================================
 
 fig.update_layout(
@@ -661,9 +811,13 @@ fig.update_layout(
 
         camera=dict(
             eye=dict(
-                x=1.7,
-                y=1.7,
-                z=1.25
+                x=1.8,
+                y=1.8,
+                z=1.5
+            ),
+
+            projection=dict(
+                type="perspective"
             )
         )
     ),
@@ -673,6 +827,7 @@ fig.update_layout(
             color="white",
             size=13
         ),
+
         bgcolor="rgba(4,8,21,0.75)"
     )
 )
@@ -688,78 +843,135 @@ st.plotly_chart(
 # GROUND TRACK
 # =========================================================
 
-st.markdown("## 🌐 Ground Track")
+st.markdown(
+    "## 🌐 Ground Track"
+)
 
 track_lat = [
-    p["latitude"]
-    for p in ground
+    point["latitude"]
+    for point in ground_track
 ]
 
 track_lon = [
-    p["longitude"]
-    for p in ground
+    point["longitude"]
+    for point in ground_track
 ]
 
 ground_fig = go.Figure()
 
+
+# Ground track line
 ground_fig.add_trace(
     go.Scattergeo(
         lon=track_lon,
         lat=track_lat,
+
         mode="lines",
+
         line=dict(
             color="#35D5F5",
             width=3
         ),
-        name="Ground Track"
+
+        name="Predicted Ground Track"
     )
 )
 
+
+# Current location
 ground_fig.add_trace(
     go.Scattergeo(
-        lon=[data["longitude"]],
-        lat=[data["latitude"]],
+        lon=[
+            data["longitude"]
+        ],
+
+        lat=[
+            data["latitude"]
+        ],
+
         mode="markers",
+
         marker=dict(
-            size=12,
+            size=14,
             color="#FFB454"
         ),
+
         name="Current Position",
+
         hovertemplate=(
-            f"Latitude: {data['latitude']:.4f}°<br>"
-            f"Longitude: {data['longitude']:.4f}°"
+            f"Latitude: "
+            f"{data['latitude']:.4f}°<br>"
+            f"Longitude: "
+            f"{data['longitude']:.4f}°"
             "<extra></extra>"
         )
     )
 )
 
+
 ground_fig.update_geos(
+
     projection_type="equirectangular",
+
     showland=True,
+
     showcountries=True,
+
     showocean=True,
+
     showcoastlines=True,
+
     bgcolor="#040815"
 )
 
+
 ground_fig.update_layout(
+
     height=500,
+
     margin=dict(
         l=0,
         r=0,
         t=10,
         b=0
     ),
+
     paper_bgcolor="#040815",
+
     font=dict(
         color="white"
     )
 )
 
+
 st.plotly_chart(
     ground_fig,
     use_container_width=True
 )
+
+
+# =========================================================
+# SATELLITE DETAILS
+# =========================================================
+
+with st.expander(
+    "🛰️ Satellite Technical Details"
+):
+
+    st.write(
+        "**Satellite:**",
+        selected["name"]
+    )
+
+    st.write(
+        "**TLE Line 1:**",
+        selected["line1"]
+    )
+
+    st.write(
+        "**TLE Line 2:**",
+        selected["line2"]
+    )
 
 
 # =========================================================
@@ -769,7 +981,12 @@ st.plotly_chart(
 st.markdown("---")
 
 st.caption(
-    "Orbital data: CelesTrak GP/TLE data mirror • "
+    "Orbital data: CelesTrak TLE data mirror • "
     "Propagation: SGP4 • "
-    "Coordinate conversion: ECI/TEME → ECEF"
+    "Position: TEME/ECI → ECEF → geographic coordinates"
+)
+
+st.caption(
+    "Note: satellite position is an estimate derived from the "
+    "latest available orbital elements, not a precision operational ephemeris."
 )
