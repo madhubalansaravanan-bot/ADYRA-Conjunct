@@ -1,0 +1,5 @@
+streamlit
+sgp4
+requests
+numpy
+plotly
