@@ -1,5 +1,5 @@
 streamlit
-streamlit-components
-sgp4
-requests
 numpy
+pandas
+requests
+sgp4
