@@ -12,197 +12,286 @@ st.set_page_config(
 )
 
 st.title("🛰️ ADYRA OrbitGuard")
-st.caption("Real satellite tracking and conjunction screening")
+st.caption("Real Satellite Tracking & Conjunction Analysis")
+
+# --------------------------------------------------
+# REAL TLE DATA
+# GitHub mirror of CelesTrak data
+# --------------------------------------------------
+
+TLE_URL = (
+    "https://raw.githubusercontent.com/"
+    "caelo-works/tle-mirror/main/tle/stations.tle"
+)
 
 
-# ---------------------------------------------------------
-# LOAD REAL SATELLITE DATA
-# ---------------------------------------------------------
-
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=1800)
 def load_satellites():
 
-    url = (
-        "https://celestrak.org/NORAD/elements/"
-        "gp.php?GROUP=STATIONS&FORMAT=JSON"
-    )
-
     response = requests.get(
-        url,
-        timeout=60,
-        headers={
-            "User-Agent": "ADYRA-OrbitGuard/1.0"
-        }
+        TLE_URL,
+        timeout=30
     )
 
     response.raise_for_status()
 
-    data = response.json()
+    lines = [
+        line.strip()
+        for line in response.text.splitlines()
+        if line.strip()
+    ]
 
     satellites = []
 
-    for sat in data:
+    for i in range(0, len(lines) - 2, 3):
 
-        try:
+        name = lines[i]
+        line1 = lines[i + 1]
+        line2 = lines[i + 2]
+
+        if line1.startswith("1 ") and line2.startswith("2 "):
+
             satellites.append({
-                "name": sat["OBJECT_NAME"],
-                "norad": sat.get("NORAD_CAT_ID"),
-                "epoch": sat.get("EPOCH"),
-                "inclination": sat.get("INCLINATION"),
-                "raan": sat.get("RA_OF_ASC_NODE"),
-                "eccentricity": sat.get("ECCENTRICITY"),
-                "arg_perigee": sat.get("ARG_OF_PERICENTER"),
-                "mean_anomaly": sat.get("MEAN_ANOMALY"),
-                "mean_motion": sat.get("MEAN_MOTION"),
+                "name": name,
+                "line1": line1,
+                "line2": line2
             })
-
-        except KeyError:
-            continue
 
     return satellites
 
 
-# ---------------------------------------------------------
-# CREATE SATELLITE OBJECT FROM OMM DATA
-# ---------------------------------------------------------
+# --------------------------------------------------
+# CALCULATE SATELLITE POSITION
+# --------------------------------------------------
 
-def create_satellite(sat):
+def calculate_position(line1, line2):
 
-    epoch = datetime.fromisoformat(
-        sat["epoch"].replace("Z", "+00:00")
+    satellite = Satrec.twoline2rv(
+        line1,
+        line2
     )
 
-    year = epoch.year
-    day_of_year = (
-        epoch.timetuple().tm_yday
-        + (
-            epoch.hour * 3600
-            + epoch.minute * 60
-            + epoch.second
-            + epoch.microsecond / 1e6
-        ) / 86400
+    now = datetime.now(timezone.utc)
+
+    jd = (
+        now.timestamp() / 86400.0
+        + 2440587.5
     )
 
-    # SGP4 satellite object
-    satellite = Satrec()
+    jd_int = int(jd)
+    jd_fraction = jd - jd_int
 
-    satellite.sgp4init(
-        0,
-        "i",
-        float(sat["mean_motion"]) ** (2 / 3),
-        0.0,
-        float(sat["eccentricity"]),
-        np.radians(float(sat["arg_perigee"])),
-        np.radians(float(sat["inclination"])),
-        np.radians(float(sat["mean_anomaly"])),
-        float(sat["mean_motion"]),
-        0.0,
-        np.radians(float(sat["raan"]))
+    error, position, velocity = satellite.sgp4(
+        jd_int,
+        jd_fraction
     )
 
-    return satellite
+    if error != 0:
+        return None
+
+    position = np.array(position)
+    velocity = np.array(velocity)
+
+    # SGP4 position is km
+    x, y, z = position
+
+    # Approximate geocentric coordinates
+    longitude = np.degrees(
+        np.arctan2(y, x)
+    )
+
+    latitude = np.degrees(
+        np.arctan2(
+            z,
+            np.sqrt(x*x + y*y)
+        )
+    )
+
+    altitude = (
+        np.linalg.norm(position)
+        - 6378.137
+    )
+
+    speed = np.linalg.norm(
+        velocity
+    )
+
+    return {
+        "latitude": latitude,
+        "longitude": longitude,
+        "altitude": altitude,
+        "velocity": speed,
+        "time": now
+    }
 
 
-# ---------------------------------------------------------
+# --------------------------------------------------
 # LOAD DATA
-# ---------------------------------------------------------
+# --------------------------------------------------
 
 try:
 
     satellites = load_satellites()
 
-    if not satellites:
-        st.error("No satellite data was returned.")
-        st.stop()
-
 except Exception as e:
 
-    st.error("Unable to connect to the satellite data source.")
+    st.error(
+        "Unable to load satellite data."
+    )
 
     st.code(str(e))
 
-    st.info(
-        "The application is running, but the external satellite "
-        "data service is currently unreachable."
+    st.stop()
+
+
+if not satellites:
+
+    st.error(
+        "No satellite data found."
     )
 
     st.stop()
 
 
-# ---------------------------------------------------------
-# SATELLITE SEARCH
-# ---------------------------------------------------------
-
 st.success(
-    f"🛰️ Real satellite data loaded: {len(satellites)} objects"
+    f"🛰️ {len(satellites)} real satellite records loaded"
 )
 
-names = [
+
+# --------------------------------------------------
+# SATELLITE SELECTION
+# --------------------------------------------------
+
+satellite_names = [
     sat["name"]
     for sat in satellites
 ]
 
-
 selected_name = st.selectbox(
     "🔎 Select Satellite",
-    names
+    satellite_names
 )
 
 
 selected = next(
-    sat for sat in satellites
+    sat
+    for sat in satellites
     if sat["name"] == selected_name
 )
 
 
-# ---------------------------------------------------------
-# SATELLITE INFORMATION
-# ---------------------------------------------------------
+# --------------------------------------------------
+# POSITION
+# --------------------------------------------------
 
-st.markdown("## 🛰️ Satellite Information")
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric(
-    "Satellite",
-    selected["name"]
-)
-
-col2.metric(
-    "NORAD ID",
-    selected["norad"]
-)
-
-col3.metric(
-    "Epoch",
-    selected["epoch"]
-)
-
-col4, col5, col6 = st.columns(3)
-
-col4.metric(
-    "Inclination",
-    f"{float(selected['inclination']):.2f}°"
-)
-
-col5.metric(
-    "Eccentricity",
-    f"{float(selected['eccentricity']):.6f}"
-)
-
-col6.metric(
-    "Mean Motion",
-    f"{float(selected['mean_motion']):.4f} rev/day"
+data = calculate_position(
+    selected["line1"],
+    selected["line2"]
 )
 
 
-# ---------------------------------------------------------
+if data:
+
+    st.markdown(
+        "## 📍 Current Estimated Position"
+    )
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric(
+        "Latitude",
+        f"{data['latitude']:.4f}°"
+    )
+
+    col2.metric(
+        "Longitude",
+        f"{data['longitude']:.4f}°"
+    )
+
+    col3.metric(
+        "Altitude",
+        f"{data['altitude']:.2f} km"
+    )
+
+    col4.metric(
+        "Velocity",
+        f"{data['velocity']:.2f} km/s"
+    )
+
+    st.caption(
+        "Position propagated from the latest available "
+        "TLE using SGP4."
+    )
+
+    st.caption(
+        "Time: "
+        + data["time"].strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
+    )
+
+
+    # --------------------------------------------------
+    # EARTH VISUALIZATION
+    # --------------------------------------------------
+
+    st.markdown(
+        "## 🌍 Satellite Location"
+    )
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scattergeo(
+            lon=[data["longitude"]],
+            lat=[data["latitude"]],
+            mode="markers",
+            marker=dict(
+                size=15
+            ),
+            text=[
+                selected_name
+            ],
+            hovertemplate=(
+                "<b>%{text}</b><br>"
+                "Latitude: %{lat:.4f}°<br>"
+                "Longitude: %{lon:.4f}°"
+                "<extra></extra>"
+            )
+        )
+    )
+
+    fig.update_geos(
+        projection_type="orthographic",
+        showland=True,
+        showcountries=True,
+        showocean=True,
+        coastlinecolor="gray"
+    )
+
+    fig.update_layout(
+        height=650,
+        margin=dict(
+            l=0,
+            r=0,
+            t=0,
+            b=0
+        )
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
+
+
+# --------------------------------------------------
 # DATA SOURCE
-# ---------------------------------------------------------
+# --------------------------------------------------
 
 st.markdown("---")
 
 st.caption(
-    "Data source: CelesTrak General Perturbations (GP) data. "
-    "Orbital position calculations will use SGP4."
+    "Orbital data: CelesTrak GP data mirrored through "
+    "GitHub. Position: SGP4 propagation."
 )
